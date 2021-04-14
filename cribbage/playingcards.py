@@ -4,10 +4,10 @@ import random
 class Deck:
     """Deck of cards."""
     SUITS = {
-        'hearts': {'name': 'hearts', 'symbol': '♥', 'unicode_flag': 'B'},
-        'diamonds': {'name': 'diamonds', 'symbol': '♦', 'unicode_flag': 'C'},
-        'clubs': {'name': 'clubs', 'symbol': '♣', 'unicode_flag': 'D'},
-        'spades': {'name': 'spades', 'symbol': '♠', 'unicode_flag': 'A'}
+        'hearts': {'name': 'hearts', 'symbol': '♥', 'unicode_flag': 'B', 'rank': 1},
+        'diamonds': {'name': 'diamonds', 'symbol': '♦', 'unicode_flag': 'C', 'rank': 2},
+        'clubs': {'name': 'clubs', 'symbol': '♣', 'unicode_flag': 'D', 'rank': 3},
+        'spades': {'name': 'spades', 'symbol': '♠', 'unicode_flag': 'A', 'rank': 4}
     }
 
     RANKS = {
