@@ -86,7 +86,7 @@ class Card:
 
     def __eq__(self, other):
         if type(other) == Card:
-            return self.rank['value'] == other.rank['value']
+            return self.rank['value'] == other.rank['value'] and self.suit['rank'] == other.suit['rank']
         elif type(other) == int:
             return self.rank['value'] == other
         else:

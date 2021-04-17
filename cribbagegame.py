@@ -1,10 +1,13 @@
 """Cribbage game."""
 import random
+import time
+import numpy as np
+from matplotlib import pyplot
 from cribbage import scoring
-from cribbage.player import HumanPlayer, RandomPlayer
+from cribbage.player import HumanPlayer, RandomPlayer, MLPlayer
 from cribbage.playingcards import Deck
 
-DEBUG = True  # Debug flag for debugging output
+DEBUG = False  # Debug flag for debugging output
 
 
 def debug(s):
@@ -44,15 +47,27 @@ class CribbageGame:
         :return: None
         """
         starting_player = random.choice([0, 1])
-        print("Coin flip. %s is dealer." % str(self.players[starting_player]))
+        # print("Coin flip. %s is dealer." % str(self.players[starting_player]))
         player_gen = self._alternate_players(starting_player)
         game_score = [0 for _ in self.players]
+        player_histories = {p: [] for p in self.players}
         while max(game_score) < self.MAX_SCORE:
             dealer = next(player_gen)
             r = CribbageRound(self, dealer=dealer)
-            r.play()
+            # Normal game
+            # r.play()
+
+            # Training 
+            histories = r.train_discarding()
+            for player_history in player_histories:
+                if dealer == player_history:
+                    player_histories[player_history].extend(histories[0])
+                else:
+                    player_histories[player_history].extend(histories[1])
             game_score = [self.board.get_score(p) for p in self.players]
             debug(self.board)
+
+        return [np.argmax(game_score), player_histories]
 
 
 class CribbageRound:
@@ -81,7 +96,7 @@ class CribbageRound:
         for _ in range(cards_per_player):
             for p in self.game.players:
                 self.hands[p].append(self.deck.draw())
-        print("Cards dealt.")
+        # print("Cards dealt.")
 
     def _populate_crib(self):
         """Solicit crib card decisions from players and place these cards in the crib.
@@ -89,7 +104,11 @@ class CribbageRound:
         :return: None
         """
         for p in self.game.players:
-            cards_to_crib = p.select_crib_cards(self.hands[p])
+            cards_to_crib = None
+            if p == self.dealer:
+                cards_to_crib = p.select_crib_cards(self.hands[p], 1, self.game.board.get_score(self.dealer), self.game.board.get_score(self.nondealer), False)
+            else:
+                cards_to_crib = p.select_crib_cards(self.hands[p], 0, self.game.board.get_score(self.nondealer), self.game.board.get_score(self.dealer), False)
             debug("Cards cribbed: %s" % cards_to_crib)
             if not set(cards_to_crib).issubset(set(self.hands[p])):
                 raise IllegalCardChoiceError("Crib cards selected are not part of player's hand.")
@@ -122,7 +141,7 @@ class CribbageRound:
         """Cut the deck."""
         cut_point = random.randrange(len(self.deck))
         self.deck.cut(cut_point=cut_point)
-        print("Cards cut.")
+        # print("Cards cut.")
 
     def get_table_value(self, sequence_start_idx):
         """Get the total value of cards in the current active sequence.
@@ -143,18 +162,18 @@ class CribbageRound:
         self.starter = self.deck.draw()
         if self.starter.get_rank() == 'jack':
             self.game.board.peg(self.dealer, 1)
-            print("2 points to %s for his heels." % str(self.dealer))
+            # print("2 points to %s for his heels." % str(self.dealer))
         active_players = [self.nondealer, self.dealer]
         while sum([len(v) for v in self.hands.values()]):
             sequence_start_idx = len(self.table)
             while active_players:
                 for p in active_players:
-                    print("Table: " + self.table_to_str(sequence_start_idx))
-                    print("Player %s's hand: %s" % (p, self.hands[p]))
+                    # print("Table: " + self.table_to_str(sequence_start_idx))
+                    # print("Player %s's hand: %s" % (p, self.hands[p]))
                     card = p.select_card_to_play(hand=self.hands[p], table=self.table[sequence_start_idx:],
                                                  crib=self.crib)
                     if card.get_value() + self.get_table_value(sequence_start_idx) > 31 or card is None:
-                        print("Player %s chooses go." % str(p))
+                        # print("Player %s chooses go." % str(p))
                         loser = loser if loser else p
                         active_players.remove(p)
                         # If no one can play any more cards, give point to player of last card played
@@ -163,8 +182,8 @@ class CribbageRound:
                         self.hands[p].remove(card)
                         if not self.hands[p]:
                             active_players.remove(p)
-                        print("Player %s plays %s for %d" %
-                              (str(p), str(card), self.get_table_value(sequence_start_idx)))
+                        # print("Player %s plays %s for %d" %
+                            #   (str(p), str(card), self.get_table_value(sequence_start_idx)))
                         # Consider cards played by both players when scoring during play
                         assert self.get_table_value(sequence_start_idx) <= 31, \
                             "Value of cards on table must be <= 31 to be eligible for scoring."
@@ -175,7 +194,7 @@ class CribbageRound:
             if len(active_players) == 0:
                 player_of_last_card = self.table[-1]['player']
                 self.game.board.peg(player_of_last_card, 1)
-                print("Point to %s for last card played." % player_of_last_card)
+                # print("Point to %s for last card played." % player_of_last_card)
                 active_players = [p for p in self.game.players if p != player_of_last_card and self.hands[p]]
                 if self.hands[player_of_last_card]:
                     active_players += [player_of_last_card]
@@ -183,18 +202,114 @@ class CribbageRound:
         # Score each player's hand
         for p in self.game.players:
             p_cards_played = [move['card'] for move in self.table if move['player'] == p]
-            print("Scoring " + str(p) + "'s hand: " + str(p_cards_played + [self.starter]))
+            # print("Scoring " + str(p) + "'s hand: " + str(p_cards_played + [self.starter]))
             #score = self._score_hand(cards=p_cards_played + [self.starter])  # Include starter card as part of hand
             score = self._score_hand(hand = p_cards_played, s_card = self.starter, is_crib = False)
             if score:
                 self.game.board.peg(p, score)
 
         # Score the crib
-        print("Scoring the crib: " + str(self.crib + [self.starter]))
+        # print("Scoring the crib: " + str(self.crib + [self.starter]))
         #score = self._score_hand(cards=(self.crib + [self.starter]))  # Include starter card as part of crib
         score = self._score_hand(hand = self.crib, s_card = self.starter, is_crib = True)
         if score:
             self.game.board.peg(self.dealer, score)
+
+    def train_discarding(self):
+        winner = None
+        dealer_history = []
+        non_dealer_history = []
+        self._cut()
+        self._deal()
+        crib_cards = self._populate_crib_train()
+        self._cut()
+        self.starter = self.deck.draw()
+        dealer_score = 0
+        non_dealer_score = 0
+
+        # Score each player's hand
+        for p in self.game.players:
+            # print("Scoring " + str(p) + "'s hand: " + str(self.hands[p] + [self.starter]))
+            #score = self._score_hand(cards=p_cards_played + [self.starter])  # Include starter card as part of hand
+            
+            score = self._score_hand(hand = self.hands[p], s_card = self.starter, is_crib = False)
+
+            if p == self.dealer:
+                dealer_score = score 
+            else:
+                non_dealer_score = score
+            if score:
+                self.game.board.peg(p, score)
+
+        # Score the crib
+        # print("Scoring the crib: " + str(self.crib + [self.starter]))
+        #score = self._score_hand(cards=(self.crib + [self.starter]))  # Include starter card as part of crib
+        crib_score = self._score_hand(hand = self.crib, s_card = self.starter, is_crib = True)
+        if crib_score:
+            self.game.board.peg(self.dealer, crib_score)
+
+        dealer_score += crib_score
+
+        # Train
+        if isinstance(self.dealer, MLPlayer):
+            self.hands[self.dealer].insert(crib_cards[0][0], crib_cards[0][1])
+            self.hands[self.dealer].insert(crib_cards[0][2], crib_cards[0][3])
+            dealer_history.extend(self.dealer.train_crib_cards(
+                discarded=[crib_cards[0][0], crib_cards[0][2]], 
+                hand=self.hands[self.dealer], 
+                self_score=self.game.board.get_score(self.dealer), 
+                opp_score=self.game.board.get_score(self.nondealer),
+                self_round_score=dealer_score, 
+                opp_round_score=non_dealer_score,
+                crib=1
+            ))
+        if isinstance(self.nondealer, MLPlayer):
+            self.hands[self.nondealer].insert(crib_cards[1][0], crib_cards[1][1])
+            self.hands[self.nondealer].insert(crib_cards[1][2], crib_cards[1][3])
+            non_dealer_history.extend(self.nondealer.train_crib_cards(
+                discarded=[crib_cards[1][0], crib_cards[1][2]], 
+                hand=self.hands[self.nondealer],
+                self_score=self.game.board.get_score(self.nondealer), 
+                opp_score=self.game.board.get_score(self.dealer), 
+                self_round_score=non_dealer_score, 
+                opp_round_score=dealer_score,
+                crib=0
+            ))
+        
+        return [dealer_history, non_dealer_history]
+
+    def _populate_crib_train(self):
+        dealer_crib_cards = []
+        other_crib_cards = []
+        for p in self.game.players:
+            cards_to_crib = None
+            if p == self.dealer:
+                cards_to_crib = p.select_crib_cards(self.hands[p], 1, self.game.board.get_score(self.dealer), self.game.board.get_score(self.nondealer), True)
+            else:
+                cards_to_crib = p.select_crib_cards(self.hands[p], 0, self.game.board.get_score(self.nondealer), self.game.board.get_score(self.dealer), True)
+
+            debug("Cards cribbed: %s" % cards_to_crib)
+            if not set(cards_to_crib).issubset(set(self.hands[p])):
+                raise IllegalCardChoiceError("Crib cards selected are not part of player's hand.")
+            elif len(cards_to_crib) != 2:
+                raise IllegalCardChoiceError("Wrong number of cards sent to crib.")
+            else:
+                self.crib += cards_to_crib
+                if self.dealer == p:
+                    for card in cards_to_crib:
+                        dealer_crib_cards.append(self.hands[p].index(card))
+                        dealer_crib_cards.append(card)
+                else:
+                    for card in cards_to_crib:
+                        other_crib_cards.append(self.hands[p].index(card))
+                        other_crib_cards.append(card)
+
+                for card in cards_to_crib:
+                    self.hands[p].remove(card)
+
+        assert len(self.crib) == self.game.CRIB_SIZE, "Crib size is not %s" % self.game.CRIB_SIZE
+
+        return [dealer_crib_cards, other_crib_cards]
 
     def _score_play(self, card_seq):
         """Return score for latest move in an active play sequence.
@@ -208,7 +323,7 @@ class CribbageRound:
         for scenario in score_scenarios:
             s, desc = scenario.check(card_seq[:])
             score += s
-            print("[SCORE] " + desc) if desc else None
+            # print("[SCORE] " + desc) if desc else None
         return score
 
     def _score_hand(self, hand, s_card, is_crib):
@@ -223,7 +338,7 @@ class CribbageRound:
         for scenario in score_scenarios:
             s, desc = scenario.check()
             score += s
-            print("[EOR SCORING] " + desc) if desc else None
+            # print("[FOR SCORING] " + desc) if desc else None
         return score
 
 
@@ -277,9 +392,53 @@ class IllegalCardChoiceError(Exception):
 
 
 def main():
-    players = [RandomPlayer("Player1"), RandomPlayer("Player2")]
-    game = CribbageGame(players=players)
-    game.start()
+    games_to_play = 2500
+    players = [MLPlayer("Player1"), MLPlayer("Player2")]
+    player_histories = {players[0]: [], players[1]: []}
+    winning_histories = []
+    wins = [0, 0]
+    
+    start = time.time()
+    for i in range(1, games_to_play + 1):
+        game = CribbageGame(players=players)
+        info = game.start()
+        wins[info[0]] += 1
+        player_histories[players[0]].append(info[1][players[0]])
+        player_histories[players[1]].append(info[1][players[1]])
+        if i % 100 == 0:
+            winning_player = np.argmax(wins)
+            players[winning_player].player_model.save("saved_networks/player_model")
+            winning_histories.append(player_histories[players[winning_player]])
+            player_histories = {players[0]: [], players[1]: []}
+
+            for player in players:
+                player.reset_weights()
+
+            print (wins)
+            wins = [0, 0]
+        
+
+    if wins != [0, 0]:
+        winning_player = np.argmax(wins)
+        players[winning_player].player_model.save("saved_networks/player_model")
+        winning_histories.append(player_histories[players[winning_player]])
+        print(wins)
+
+    series_number = 0
+    fig, axs = pyplot.subplots(5, 5)
+    fig.suptitle("Average of Mean Absolute Error of Winner per Game by Series")
+    for game_series in winning_histories:
+        avgs_per_game = []
+        for game in game_series:
+            avgs_per_game.append(sum(game) / len(game))
+
+        axs.flat[series_number].set_title('Series ' + str(series_number + 1))
+        axs.flat[series_number].plot([n for n in range(1, 6)], avgs_per_game)
+        axs.flat[series_number].set(xlabel='Games Played', ylabel='Mean Absolute Error')
+        series_number += 1
+
+    pyplot.show()
+    print(time.time() - start)
 
 
 if __name__ == '__main__':
