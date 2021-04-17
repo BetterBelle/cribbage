@@ -393,6 +393,7 @@ class IllegalCardChoiceError(Exception):
 
 def main():
     games_to_play = 2500
+    games_per_series = 100
     players = [MLPlayer("Player1"), MLPlayer("Player2")]
     player_histories = {players[0]: [], players[1]: []}
     winning_histories = []
@@ -405,7 +406,7 @@ def main():
         wins[info[0]] += 1
         player_histories[players[0]].append(info[1][players[0]])
         player_histories[players[1]].append(info[1][players[1]])
-        if i % 100 == 0:
+        if i % games_per_series == 0:
             winning_player = np.argmax(wins)
             players[winning_player].player_model.save("saved_networks/player_model")
             winning_histories.append(player_histories[players[winning_player]])
@@ -425,7 +426,7 @@ def main():
         print(wins)
 
     series_number = 0
-    fig, axs = pyplot.subplots(5, 5)
+    fig, axs = pyplot.subplots(5,5)
     fig.suptitle("Average of Mean Absolute Error of Winner per Game by Series")
     for game_series in winning_histories:
         avgs_per_game = []
@@ -433,7 +434,7 @@ def main():
             avgs_per_game.append(sum(game) / len(game))
 
         axs.flat[series_number].set_title('Series ' + str(series_number + 1))
-        axs.flat[series_number].plot([n for n in range(1, 6)], avgs_per_game)
+        axs.flat[series_number].plot([n for n in range(1, games_per_series + 1)], avgs_per_game)
         axs.flat[series_number].set(xlabel='Games Played', ylabel='Mean Absolute Error')
         series_number += 1
 
